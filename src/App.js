@@ -1,5 +1,5 @@
-import React, {useState, useRef} from 'react';
-import {useLocation, useNavigate} from 'react-router-dom';
+import React, { useState, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import '@aws-amplify/ui-react/styles.css';
 import './App.css';
 import {
@@ -17,8 +17,8 @@ import {
     Container,
     TopNavigation
 } from "@cloudscape-design/components";
-import {Amplify, Auth, Storage} from 'aws-amplify';
-import {Authenticator} from '@aws-amplify/ui-react';
+import { Amplify, Auth, Storage } from 'aws-amplify';
+import { Authenticator } from '@aws-amplify/ui-react';
 
 import awsconfig from './aws-exports';
 
@@ -48,15 +48,15 @@ const ServiceNavigation = () => {
     return (
         <SideNavigation
             activeHref={location.pathname}
-            header={{href: "/", text: "S3 Object Uploader"}}
+            header={{ href: "/", text: "S3 Object Uploader" }}
             onFollow={onFollowHandler}
             items={[
-                {type: "link", text: "Upload", href: "/"},
-                {type: "divider"},
+                { type: "link", text: "Upload", href: "/" },
+                { type: "divider" },
                 {
                     type: "link",
-                    text: "AWS Solutions Architect",
-                    href: "https://workshops.aws",
+                    text: "Go Home",
+                    href: "https://www.berxi.com/",
                     external: true
                 }
             ]}
@@ -66,7 +66,9 @@ const ServiceNavigation = () => {
 
 function formatBytes(a, b = 2, k = 1024) {
     let d = Math.floor(Math.log(a) / Math.log(k));
-    return 0 === a ? "0 Bytes" : parseFloat((a / Math.pow(k, d)).toFixed(Math.max(0, b))) + " " + ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"][d];
+    return 0 === a ? "0 Bytes" : parseFloat((a / Math.pow(k,
+        d)).toFixed(Math.max(0, b))) + " " + ["Bytes", "KB", "MB", "GB", "TB", "PB",
+        "EB", "ZB", "YB"][d];
 }
 
 const Content = () => {
@@ -76,10 +78,12 @@ const Content = () => {
     const [fileList, setFileList] = useState([]);
     const [historyList, setHistoryList] = useState([]);
     const [historyCount, setHistoryCount] = useState(0);
+
     const handleClick = () => {
-        hiddenFileInput.current.value = ""; // This avoids errors when selecting the same files multiple times
+        hiddenFileInput.current.value = "";
         hiddenFileInput.current.click();
     };
+
     const handleChange = e => {
         e.preventDefault();
         let i, tempUploadList = [];
@@ -96,7 +100,7 @@ const Content = () => {
         setFileList(e.target.files);
     };
 
-    function progressBarFactory(fileObject) {
+    function progressBarFactory(fileObject, fileUrl) {
         let localHistory = historyList;
         const id = localHistory.length;
         localHistory.push({
@@ -105,7 +109,8 @@ const Content = () => {
             filename: fileObject.name,
             filetype: fileObject.type,
             filesize: formatBytes(fileObject.size),
-            status: 'in-progress'
+            status: 'in-progress',
+            fileUrl: fileUrl // Store the file URL here
         });
         setHistoryList(localHistory);
         return (progress) => {
@@ -126,21 +131,30 @@ const Content = () => {
             console.log('Uploading files to S3');
             let i, progressBar = [], uploadCompleted = [];
             for (i = 0; i < uploadList.length; i++) {
-                // If the user has removed some items from the Upload list, we need to correctly reference the file
                 const id = uploadList[i].id;
-                progressBar.push(progressBarFactory(fileList[id]));
-                setHistoryCount(historyCount + 1);
-                uploadCompleted.push(Storage.put(fileList[id].name, fileList[id], {
-                        progressCallback: progressBar[i],
-                        level: "protected"
-                    }).then(result => {
-                        // Trying to remove items from the upload list as they complete. Maybe not work correctly
-                        // setUploadList(uploadList.filter(item => item.label !== result.key));
-                        console.log(`Completed the upload of ${result.key}`);
-                    })
-                );
+                const fileName = fileList[id].name;
+
+                Storage.put(fileName, fileList[id], {
+                    level: "protected",
+                    progressCallback: progressBarFactory(fileList[id], fileName)
+                }).then(result => {
+                    const s3Url = `https://${awsconfig.aws_user_files_s3_bucket}.s3.${awsconfig.aws_user_files_s3_bucket_region}.amazonaws.com/protected/${result.key}`;
+                    console.log(`Completed the upload of ${result.key}`);
+                    console.log(`File available at ${s3Url}`);
+
+                    // Update historyList with the URL
+                    setHistoryList(prevHistory => {
+                        const updatedHistory = [...prevHistory];
+                        const uploadIndex = updatedHistory.findIndex(historyItem => historyItem.filename === result.key);
+                        if (uploadIndex >= 0) {
+                            updatedHistory[uploadIndex].fileUrl = s3Url;
+                        }
+                        return updatedHistory;
+                    });
+                });
             }
-            // When you finish the loop, all items should be removed from the upload list
+
+            // Reset upload list after uploads are completed
             Promise.all(uploadCompleted)
                 .then(() => setUploadList([]));
         }
@@ -153,21 +167,28 @@ const Content = () => {
         ]);
     };
 
-    const List = ({list}) => (
+    const List = ({ list }) => (
         <>
             {list.map((item) => (
-                <ProgressBar
-                    key={item.id}
-                    status={item.status}
-                    value={item.percentage}
-                    variant="standalone"
-                    additionalInfo={item.filesize}
-                    description={item.filetype}
-                    label={item.filename}
-                />
+                <div key={item.id}>
+                    <ProgressBar
+                        status={item.status}
+                        value={item.percentage}
+                        variant="standalone"
+                        additionalInfo={item.filesize}
+                        description={item.filetype}
+                        label={item.filename}
+                    />
+                    {item.status === 'success' && item.fileUrl && (
+                        <Link external href={item.fileUrl}>
+                            {item.fileUrl}
+                        </Link>
+                    )}
+                </div>
             ))}
         </>
     );
+
     return (
         <ContentLayout
             header={
@@ -175,78 +196,74 @@ const Content = () => {
                     <Header
                         variant="h1"
                         info={<Link>Info</Link>}
-                        description="Web application to upload files to S3"
+                        description="Application to upload files to S3"
                     >
                         Application
                     </Header>
                 </SpaceBetween>
             }
         >
-        <SpaceBetween size="l">
-            <Container
-                header={
-                    <Header variant="h2">
-                        Upload multiple objects to S3
-                    </Header>
-                }
-            >
-                {
-                    <div>
-                        {visibleAlert &&
-                            <Alert
-                                onDismiss={() => setVisibleAlert(false)}
-                                dismissAriaLabel="Close alert"
-                                dismissible
-                                type="error"
-                                header="No files selected"
-                            >
-                                You must select the files that you want to upload.
-                            </Alert>
-                        }
+            <SpaceBetween size="l">
+                <Container
+                    header={
+                        <Header variant="h2">
+                            Get Started Here!
+                        </Header>
+                    }
+                >
+                    {visibleAlert &&
+                        <Alert
+                            onDismiss={() => setVisibleAlert(false)}
+                            dismissAriaLabel="Close alert"
+                            dismissible
+                            type="error"
+                            header="No files selected"
+                        >
+                            You must select the files that you want to upload.
+                        </Alert>
+                    }
 
-                        <FormField
-                            label='Object Upload'
-                            description='Click on the Open button and select the files that you want to upload'
+                    <FormField
+                        label='Object Upload'
+                        description='Click open, then select the files you want to upload from your computer'
+                    />
+
+                    <SpaceBetween direction="horizontal" size="xs">
+                        <Button onClick={handleClick}
+                            iconAlign="left"
+                            iconName="upload"
+                        >
+                            Choose file[s]
+                        </Button>
+                        <input
+                            type="file"
+                            ref={hiddenFileInput}
+                            onChange={handleChange}
+                            style={{ display: 'none' }}
+                            multiple
                         />
+                        <Button variant="primary" onClick={handleUpload}>Upload</Button>
+                    </SpaceBetween>
 
-                        <SpaceBetween direction="horizontal" size="xs">
-                            <Button onClick={handleClick}
-                                    iconAlign="left"
-                                    iconName="upload"
-                            >
-                                Choose file[s]
-                            </Button>
-                            <input
-                                type="file"
-                                ref={hiddenFileInput}
-                                onChange={handleChange}
-                                style={{display: 'none'}}
-                                multiple
-                            />
-                            <Button variant="primary" onClick={handleUpload}>Upload</Button>
-                        </SpaceBetween>
-
-                        <TokenGroup
-                            onDismiss={({detail: {itemIndex}}) => {
-                                handleDismiss(itemIndex)
-                            }}
-                            items={uploadList}
-                            alignment="vertical"
-                            limit={10}
-                        />
-                    </div>
-                }
-            </Container>
-            <Container
-                header={
-                    <Header variant="h2">
-                        History
-                    </Header>
-                }
-            >
-                <List list={historyList}/>
-            </Container>
-        </SpaceBetween>
+                    <TokenGroup
+                        onDismiss={({ detail: { itemIndex } }) => {
+                            handleDismiss(itemIndex)
+                        }}
+                        items={uploadList}
+                        alignment="vertical"
+                        limit={10}
+                    />
+                </Container>
+                <Container
+                    header={
+                        <Header variant="h2">
+                            History
+                        </Header>
+                    }
+                >
+                    <List list={historyList} />
+                </Container>
+            </SpaceBetween>
         </ContentLayout>
     );
 };
@@ -264,24 +281,22 @@ function App() {
 
     return (
         <Authenticator>
-            {({signOut, user}) => (
+            {({ signOut, user }) => (
                 <>
-                    <div id="navbar" style={{fontSize: 'body-l !important', position: 'sticky', top: 0, zIndex: 1002}}>
+                    <div id="navbar" style={{ fontSize: 'body-l !important', position: 'sticky', top: 0, zIndex: 1002 }}>
                         <TopNavigation
                             identity={{
                                 href: "#",
-                                title: "S3 Object Upload Tool",
+                                title: "Berxi S3 File Upload Tool",
                                 logo: {
-                                    src:
-                                        "data:image/svg+xml;base64,//48AD8AeABtAGwAIAB2AGUAcgBzAGkAbwBuAD0AIgAxAC4AMAAiACAAZQBuAGMAbwBkAGkAbgBnAD0AIgB1AHQAZgAtADEANgAiAD8APgANAAoAPAAhAC0ALQAgAEcAZQBuAGUAcgBhAHQAbwByADoAIABBAGQAbwBiAGUAIABJAGwAbAB1AHMAdAByAGEAdABvAHIAIAAxADQALgAwAC4AMAAsACAAUwBWAEcAIABFAHgAcABvAHIAdAAgAFAAbAB1AGcALQBJAG4AIAAuACAAUwBWAEcAIABWAGUAcgBzAGkAbwBuADoAIAA2AC4AMAAwACAAQgB1AGkAbABkACAANAAzADMANgAzACkAIAAgAC0ALQA+AA0ACgA8ACEARABPAEMAVABZAFAARQAgAHMAdgBnACAAUABVAEIATABJAEMAIAAiAC0ALwAvAFcAMwBDAC8ALwBEAFQARAAgAFMAVgBHACAAMQAuADEALwAvAEUATgAiACAAIgBoAHQAdABwADoALwAvAHcAdwB3AC4AdwAzAC4AbwByAGcALwBHAHIAYQBwAGgAaQBjAHMALwBTAFYARwAvADEALgAxAC8ARABUAEQALwBzAHYAZwAxADEALgBkAHQAZAAiAD4ADQAKADwAcwB2AGcAIAB2AGUAcgBzAGkAbwBuAD0AIgAxAC4AMQAiACAAaQBkAD0AIgBMAGEAeQBlAHIAXwAxACIAIAB4AG0AbABuAHMAPQAiAGgAdAB0AHAAOgAvAC8AdwB3AHcALgB3ADMALgBvAHIAZwAvADIAMAAwADAALwBzAHYAZwAiACAAeABtAGwAbgBzADoAeABsAGkAbgBrAD0AIgBoAHQAdABwADoALwAvAHcAdwB3AC4AdwAzAC4AbwByAGcALwAxADkAOQA5AC8AeABsAGkAbgBrACIAIAB4AD0AIgAwAHAAeAAiACAAeQA9ACIAMABwAHgAIgANAAoACQAgAHcAaQBkAHQAaAA9ACIANwAwAHAAeAAiACAAaABlAGkAZwBoAHQAPQAiADcAMABwAHgAIgAgAHYAaQBlAHcAQgBvAHgAPQAiADAAIAAwACAANwAwACAANwAwACIAIABlAG4AYQBiAGwAZQAtAGIAYQBjAGsAZwByAG8AdQBuAGQAPQAiAG4AZQB3ACAAMAAgADAAIAA3ADAAIAA3ADAAIgAgAHgAbQBsADoAcwBwAGEAYwBlAD0AIgBwAHIAZQBzAGUAcgB2AGUAIgA+AA0ACgA8AGcAPgANAAoACQA8AGcAPgANAAoACQAJADwAZwA+AA0ACgAJAAkACQA8AGcAPgANAAoACQAJAAkACQA8AHAAYQB0AGgAIABmAGkAbABsAC0AcgB1AGwAZQA9ACIAZQB2AGUAbgBvAGQAZAAiACAAYwBsAGkAcAAtAHIAdQBsAGUAPQAiAGUAdgBlAG4AbwBkAGQAIgAgAGYAaQBsAGwAPQAiACMAMQA0ADYARQBCADQAIgAgAGQAPQAiAE0ANgAzAC4AOQA1ACwAMQA1AC4ANwA4ADYAYwAwACwANAAuADAAMAA2AC0AMQAyAC4AOQA2ADMALAA3AC4AMgAzADgALQAyADgALgA5ADQAOQAsADcALgAyADMAOAANAAoACQAJAAkACQAJAGMALQAxADUALgA5ADgAOAAsADAALQAyADgALgA5ADUAMQAtADMALgAyADMAMgAtADIAOAAuADkANQAxAC0ANwAuADIAMwA4AGwAOQAuADYANQAsADQAMwAuADgAMwA5AGMAMAAsADIALgA2ADcAMgAsADgALgA2ADMANwAsADQALgA4ADIANgAsADEAOQAuADMAMAAxACwANAAuADgAMgA2AGMAMQAwAC4ANgA2ADIALAAwACwAMQA5AC4AMgA5ADkALQAyAC4AMQA1ADQALAAxADkALgAyADkAOQAtADQALgA4ADIANgBsADAALAAwAA0ACgAJAAkACQAJAAkATAA2ADMALgA5ADUALAAxADUALgA3ADgANgB6ACIALwA+AA0ACgAJAAkACQA8AC8AZwA+AA0ACgAJAAkACQA8AGcAPgANAAoACQAJAAkACQA8AHAAYQB0AGgAIABmAGkAbABsAC0AcgB1AGwAZQA9ACIAZQB2AGUAbgBvAGQAZAAiACAAYwBsAGkAcAAtAHIAdQBsAGUAPQAiAGUAdgBlAG4AbwBkAGQAIgAgAGYAaQBsAGwAPQAiACMAMQA0ADYARQBCADQAIgAgAGQAPQAiAE0ANgAzAC4AOQA1ACwAMQAyAC4ANwA4ADYAYwAwAC0ANAAuADAAMAA0AC0AMQAyAC4AOQA2ADMALQA3AC4AMgAzADcALQAyADgALgA5ADQAOQAtADcALgAyADMANwANAAoACQAJAAkACQAJAGMALQAxADUALgA5ADgAOAAsADAALQAyADgALgA5ADUAMQAsADMALgAyADMAMwAtADIAOAAuADkANQAxACwANwAuADIAMwA3AGMAMAAsADQALgAwADAANgAsADEAMgAuADkANgAzACwANwAuADIAMwA4ACwAMgA4AC4AOQA1ADEALAA3AC4AMgAzADgAQwA1ADAALgA5ADgANwAsADIAMAAuADAAMgA0ACwANgAzAC4AOQA1ACwAMQA2AC4ANwA5ADIALAA2ADMALgA5ADUALAAxADIALgA3ADgANgBMADYAMwAuADkANQAsADEAMgAuADcAOAA2AA0ACgAJAAkACQAJAAkAegAiAC8APgANAAoACQAJAAkAPAAvAGcAPgANAAoACQAJADwALwBnAD4ADQAKAAkAPAAvAGcAPgANAAoAPAAvAGcAPgANAAoAPAAvAHMAdgBnAD4ADQAKAA==",
-                                    alt: "S3 Object Upload tool"
-                                }
+                                    src:  "data:image/svg+xml;base64,//48AD8AeABtAGwAIAB2AGUAcgBzAGkAbwBuAD0AIgAxAC4AMAAiACAAZQBuAGMAbwBkAGkAbgBnAD0AIgB1AHQAZgAtADEANgAiAD8APgANAAoAPAAhAC0ALQAgAEcAZQBuAGUAcgBhAHQAbwByADoAIABBAGQAbwBiAGUAIABJAGwAbAB1AHMAdAByAGEAdABvAHIAIAAxADQALgAwAC4AMAAsACAAUwBWAEcAIABFAHgAcABvAHIAdAAgAFAAbAB1AGcALQBJAG4AIAAuACAAUwBWAEcAIABWAGUAcgBzAGkAbwBuADoAIAA2AC4AMAAwACAAQgB1AGkAbABkACAANAAzADMANgAzACkAIAAgAC0ALQA+AA0ACgA8ACEARABPAEMAVABZAFAARQAgAHMAdgBnACAAUABVAEIATABJAEMAIAAiAC0ALwAvAFcAMwBDAC8ALwBEAFQARAAgAFMAVgBHACAAMQAuADEALwAvAEUATgAiACAAIgBoAHQAdABwADoALwAvAHcAdwB3AC4AdwAzAC4AbwByAGcALwBHAHIAYQBwAGgAaQBjAHMALwBTAFYARwAvADEALgAxAC8ARABUAEQALwBzAHYAZwAxADEALgBkAHQAZAAiAD4ADQAKADwAcwB2AGcAIAB2AGUAcgBzAGkAbwBuAD0AIgAxAC4AMQAiACAAaQBkAD0AIgBMAGEAeQBlAHIAXwAxACIAIAB4AG0AbABuAHMAPQAiAGgAdAB0AHAAOgAvAC8AdwB3AHcALgB3ADMALgBvAHIAZwAvADIAMAAwADAALwBzAHYAZwAiACAAeABtAGwAbgBzADoAeABsAGkAbgBrAD0AIgBoAHQAdABwADoALwAvAHcAdwB3AC4AdwAzAC4AbwByAGcALwAxADkAOQA5AC8AeABsAGkAbgBrACIAIAB4AD0AIgAwAHAAeAAiACAAeQA9ACIAMABwAHgAIgANAAoACQAgAHcAaQBkAHQAaAA9ACIANwAwAHAAeAAiACAAaABlAGkAZwBoAHQAPQAiADcAMABwAHgAIgAgAHYAaQBlAHcAQgBvAHgAPQAiADAAIAAwACAANwAwACAANwAwACIAIABlAG4AYQBiAGwAZQAtAGIAYQBjAGsAZwByAG8AdQBuAGQAPQAiAG4AZQB3ACAAMAAgADAAIAA3ADAAIAA3ADAAIgAgAHgAbQBsADoAcwBwAGEAYwBlAD0AIgBwAHIAZQBzAGUAcgB2AGUAIgA+AA0ACgA8AGcAPgANAAoACQA8AGcAPgANAAoACQAJADwAZwA+AA0ACgAJAAkACQA8AGcAPgANAAoACQAJAAkACQA8AHAAYQB0AGgAIABmAGkAbABsAC0AcgB1AGwAZQA9ACIAZQB2AGUAbgBvAGQAZAAiACAAYwBsAGkAcAAtAHIAdQBsAGUAPQAiAGUAdgBlAG4AbwBkAGQAIgAgAGYAaQBsAGwAPQAiACMAMQA0ADYARQBCADQAIgAgAGQAPQAiAE0ANgAzAC4AOQA1ACwAMQA1AC4ANwA4ADYAYwAwACwANAAuADAAMAA2AC0AMQAyAC4AOQA2ADMALAA3AC4AMgAzADgALQAyADgALgA5ADQAOQAsADcALgAyADMAOAANAAoACQAJAAkACQAJAGMALQAxADUALgA5ADgAOAAsADAALQAyADgALgA5ADUAMQAtADMALgAyADMAMgAtADIAOAAuADkANQAxAC0ANwAuADIAMwA4AGwAOQAuADYANQAsADQAMwAuADgAMwA5AGMAMAAsADIALgA2ADcAMgAsADgALgA2ADMANwAsADQALgA4ADIANgAsADEAOQAuADMAMAAxACwANAAuADgAMgA2AGMAMQAwAC4ANgA2ADIALAAwACwAMQA5AC4AMgA5ADkALQAyAC4AMQA1ADQALAAxADkALgAyADkAOQAtADQALgA4ADIANgBsADAALAAwAA0ACgAJAAkACQAJAAkATAA2ADMALgA5ADUALAAxADUALgA3ADgANgB6ACIALwA+AA0ACgAJAAkACQA8AC8AZwA+AA0ACgAJAAkACQA8AGcAPgANAAoACQAJAAkACQA8AHAAYQB0AGgAIABmAGkAbABsAC0AcgB1AGwAZQA9ACIAZQB2AGUAbgBvAGQAZAAiACAAYwBsAGkAcAAtAHIAdQBsAGUAPQAiAGUAdgBlAG4AbwBkAGQAIgAgAGYAaQBsAGwAPQAiACMAMQA0ADYARQBCADQAIgAgAGQAPQAiAE0ANgAzAC4AOQA1ACwAMQAyAC4ANwA4ADYAYwAwAC0ANAAuADAAMAA0AC0AMQAyAC4AOQA2ADMALQA3AC4AMgAzADcALQAyADgALgA5ADQAOQAtADcALgAyADMANwANAAoACQAJAAkACQAJAGMALQAxADUALgA5ADgAOAAsADAALQAyADgALgA5ADUAMQAsADMALgAyADMAMwAtADIAOAAuADkANQAxACwANwAuADIAMwA3AGMAMAAsADQALgAwADAANgAsADEAMgAuADkANgAzACwANwAuADIAMwA4ACwAMgA4AC4AOQA1ADEALAA3AC4AMgAzADgAQwA1ADAALgA5ADgANwAsADIAMAAuADAAMgA0ACwANgAzAC4AOQA1ACwAMQA2AC4ANwA5ADIALAA2ADMALgA5ADUALAAxADIALgA3ADgANgBMADYAMwAuADkANQAsADEAMgAuADcAOAA2AA0ACgAJAAkACQAJAAkAegAiAC8APgANAAoACQAJAAkAPAAvAGcAPgANAAoACQAJADwALwBnAD4ADQAKAAkAPAAvAGcAPgANAAoAPAAvAGcAPgANAAoAPAAvAHMAdgBnAD4ADQAKAA==",
+                                    alt: "Berxi S3 File Upload Tool"
                             }}
-                            utilities={[
+                          }  utilities={[
                                 {
                                     type: "button",
-                                    text: "AWS",
-                                    href: "https://aws.amazon.com/",
+                                    text: "Access Uploaded Content",
+                                    href: "https://us-east-1.console.aws.amazon.com/s3/buckets/berxuploadedcbe21-dev?region=us-east-1&bucketType=general&tab=objects/",
                                     external: true,
                                     externalIconAriaLabel: " (opens in a new tab)"
                                 },
@@ -292,18 +307,7 @@ function App() {
                                     iconName: "user-profile",
                                     onItemClick: navbarItemClick,
                                     items: [
-                                        {id: "profile", text: "Profile"},
-                                        {id: "preferences", text: "Preferences"},
-                                        {id: "security", text: "Security"},
-                                        {
-                                            id: "feedback",
-                                            text: "Feedback",
-                                            href: "#",
-                                            external: true,
-                                            externalIconAriaLabel:
-                                                " (opens in new tab)"
-                                        },
-                                        {id: "signout", text: "Sign out"}
+                                        { id: "signout", text: "Sign out" }
                                     ]
                                 }
                             ]}
@@ -315,17 +319,17 @@ function App() {
                         />
                     </div>
                     <AppLayout
-                        content={<Content/>}
+                        content={<Content />}
                         headerSelector='#navbar'
-                        navigation={<ServiceNavigation/>}
+                        navigation={<ServiceNavigation />}
                         navigationOpen={navigationOpen}
-                        onNavigationChange={({detail}) => setNavigationOpen(detail.open)}
+                        onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
                         ariaLabels={appLayoutLabels}
                     />
                 </>
             )}
         </Authenticator>
     );
-}
+}export default App;
 
-export default App;
+
